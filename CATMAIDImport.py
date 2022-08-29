@@ -1934,25 +1934,27 @@ def import_skeleton(compact_skeleton,
     # -> this will be starting point for creation of the curves
     root_node = node_ids[parent_ids < 0][0]
 
-    # Create the object
-    cu = bpy.data.curves.new(f"{object_name} curve", 'CURVE')
-    ob = bpy.data.objects.new(object_name, cu)
-    ob.location = (0, 0, 0)
-    ob.show_name = True
-    ob['type'] = 'NEURON'
-    ob['subtype'] = 'NEURITES'
-    ob['CATMAID_object'] = True
-    ob['downsampling'] = downsampling if downsampling else 0
-    ob['id'] = str(skeleton_id)
-    cu.dimensions = '3D'
-    cu.fill_mode = 'FULL'
-    cu.bevel_resolution = 5
-    cu.resolution_u = 10
+    # Create an object for the segment curve, but only if there are segments
+    if len(segments) > 0:
+        # Create the object
+        cu = bpy.data.curves.new(f"{object_name} curve", 'CURVE')
+        ob = bpy.data.objects.new(object_name, cu)
+        ob.location = (0, 0, 0)
+        ob.show_name = True
+        ob['type'] = 'NEURON'
+        ob['subtype'] = 'NEURITES'
+        ob['CATMAID_object'] = True
+        ob['downsampling'] = downsampling if downsampling else 0
+        ob['id'] = str(skeleton_id)
+        cu.dimensions = '3D'
+        cu.fill_mode = 'FULL'
+        cu.bevel_resolution = 5
+        cu.resolution_u = 10
 
-    if use_radii:
-        cu.bevel_depth = 1
-    else:
-        cu.bevel_depth = 0.015
+        if use_radii:
+            cu.bevel_depth = 1
+        else:
+            cu.bevel_depth = 0.015
 
     # DO NOT touch this: lookup via dict is >10X faster!
     tn_coords = {n: co for n, co in zip(node_ids, coords)}
@@ -2008,6 +2010,34 @@ def import_skeleton(compact_skeleton,
 
             # Set this material for this spline
             sp.material_index = slot
+
+    # There are no segments for a single node, so it has no curve; represent it as a sphere
+    if len(segments) == 0 and len(node_ids) == 1:
+        node = node_ids[0]
+        loc = tn_coords[node]
+        rad = tn_radii[node]
+
+        mesh = bpy.data.meshes.new(f'{object_name} - mesh')
+        ob = bpy.data.objects.new(object_name, mesh)
+
+        ob.location = loc
+
+        # Construct the bmesh cube and assign it to the blender mesh.
+        bm = bmesh.new()
+        try:
+            bmesh.ops.create_uvsphere(bm, u_segments=16, v_segments=8, diameter=rad)
+        except TypeError:
+            bmesh.ops.create_uvsphere(bm, u_segments=16, v_segments=8, radius=rad)
+        bm.to_mesh(mesh)
+        bm.free()
+
+        mesh.polygons.foreach_set('use_smooth', [True] * len(mesh.polygons))
+
+        ob.name = object_name
+        ob['type'] = 'NEURON'
+        ob['subtype'] = 'NEURITES'
+        ob['CATMAID_object'] = True
+        ob['id'] = str(skeleton_id)
 
     # Take care of the material
     if not color_by_strahler:
